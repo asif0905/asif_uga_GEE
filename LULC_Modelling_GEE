@@ -1,0 +1,368 @@
+var trueColor = table.select(['R', 'G', 'B']);
+var trueColorVis = {
+  min: 0.0,
+  max: 255.0,
+};
+Map.addLayer(trueColor, trueColorVis, 'Perdido Bay boundary (HUC-8)');
+Map.centerObject(table, 10);
+
+// var trueColor = table2.select(['R', 'G', 'B']);
+// var trueColorVis = {
+//   min: 0.0,
+//   max: 255.0,
+// };
+// Map.addLayer(trueColor, trueColorVis, 'Random Points');
+// Map.centerObject(table, 10);
+//Determine Land Cover in 2001//
+
+
+//load Landsat 7 Tier 1 TOA image collection
+var landsat_7 = ee.ImageCollection('LANDSAT/LT05/C01/T1_TOA')
+    .filterBounds(table)
+    .filterDate('1999-06-01', '1999-08-30')
+    .sort('CLOUD_COVER')
+    .first();
+
+// //var landsat_7_1 = ee.ImageCollection('LANDSAT/LT05/C01/T1_TOA')
+//     .filterBounds(table)
+//     .filterDate('1999-01-01', '1999-12-30')
+//     .sort('CLOUD_COVER')
+//     .first();
+  
+// var landsat_7_2 = ee.ImageCollection('LANDSAT/LT05/C01/T1_TOA')
+//     .filterBounds(table)
+//     .filterDate('2000-01-01', '2000-12-30')
+//     .sort('CLOUD_COVER')
+//     .first();  
+  
+// //Mosaic theese 3 L7 image collections 
+// var mosaic_1 = ee.ImageCollection.fromImages([landsat_7_2, landsat_7_1, landsat_7]).mosaic();
+
+//clip by asset/roi
+var landsat_2001 = landsat_7.clip(table);
+
+//Display the cliped image collection with visual parameters 
+//Map.setCenter(-87.67782, 30.55895, 9);
+//Map.addLayer(landsat_2001, {min: 0, max: 8}, 'PerdidoBay_2001');
+
+//Zoom to roi
+Map.centerObject(table, 8);
+
+//Merge sample points together into one FeatureCollection
+var landcover_2001 = Open_Water.merge(Crops_Pasture).merge(Mixed_Forest).merge(Evergreen_Forest).merge(Developed_HighMediumLow).merge(Developed_OpenSpace).merge(Grasslands_Shrub).merge(Barren_Land).merge(Wetlands);
+
+//Select Bands from mosaic Image for training
+var bands = ['B1','B2', 'B3', 'B4', 'B5', 'B6', 'B7'];
+
+//The name of the property on the points storing the class lebel
+var classProperty = 'LULC';
+
+//Sample the input imagery to get a FeatureCollection of training data
+var training = landsat_2001.select(bands).sampleRegions({
+  collection: landcover_2001,
+  properties: [classProperty],
+  scale: 30
+});
+
+//Train the classifier
+var classifier = ee.Classifier.smileCart().train({
+  features: training,
+  classProperty: classProperty,
+});
+
+//Classify the input imagery
+var classified_2001 = landsat_2001.classify(classifier).clip(table);
+
+var custom_palette = [
+  '1272d6', // Open_Water (0)
+  'd3e013', // Crops_Pasture (1)
+  '37d84b', // Mixed_Forest (2) 
+  '068015', // Evergreen_Forest (3)
+  'da1111', // Developed_HighMediumLow (4) 
+  'de9e4e', // Developed_OpenSpace (5) 
+  '93c028', // Grassland_Shrub (6) 
+  'b78811', // Barren_land (7) 
+  '05d4de', // Wetlands (8) 
+];
+
+Map.addLayer(classified_2001.clip(table), {
+  min:0, max: 8, palette: custom_palette}, 'LULC_2001');
+  
+// //Optinally, do some accuracy assessment. First, add a column of random uniforms to the training dataset.
+var withRandom = training.randomColumn('random');
+
+// //We want to reserve some of the data for testing, to avoid overfitting the model.
+var split = 0.7; //Roughly 70% training, 30% testing.
+var trainingPartition = withRandom.filter(ee.Filter.lt('random', split));
+var testingPartition = withRandom.filter(ee.Filter.gte('random', split));
+
+// //Trained with 70% of our data.
+var trainedClassifier = ee.Classifier.smileRandomForest(100).train({
+   features: trainingPartition,
+   classProperty: classProperty,
+   inputProperties: bands
+});
+
+// //classify the test FeatureCollection.
+var test_1 = testingPartition.classify(trainedClassifier);
+
+// //Print the Confusion Matrix.
+var confusionMatrix_2001 = test_1.errorMatrix(classProperty, 'classification');
+print('Confusion Matrix 2001', confusionMatrix_2001);
+//print('Validation accuracy 2001: ',confusionMatrix_2001.accuracy());
+
+var OA = confusionMatrix_2001.accuracy()
+var CA = confusionMatrix_2001.consumersAccuracy()
+var Kappa = confusionMatrix_2001.kappa()
+var Order = confusionMatrix_2001.order()
+var PA = confusionMatrix_2001.producersAccuracy()
+
+print(OA,'Overall Accuracy')
+print(CA,'Consumers Accuracy')
+print(Kappa,'Kappa')
+print(Order,'Order')
+print(PA,'Producers Accuracy')
+
+
+//Determine the Landcover 2019//
+//Import Landsat 8 scaled radiance (Landsat 8 Tier 1 TOA) ImageCollection
+var landsat_8 = ee.ImageCollection("LANDSAT/LC08/C01/T1_TOA")
+    .filterBounds(table)
+    .filterDate('2017-01-01', '2017-12-30')
+    .sort('CLOUD_COVER')
+    .first();
+    
+// var landsat_8_1 = ee.ImageCollection("LANDSAT/LC08/C01/T1_TOA")
+//     .filterBounds(table)
+//     .filterDate('2019-01-01', '2019-12-30')
+//     .sort('CLOUD_COVER')
+//     .first();
+  
+// var landsat_8_2 = ee.ImageCollection("LANDSAT/LC08/C01/T1_TOA")
+//     .filterBounds(table)
+//     .filterDate('2019-01-01', '2019-12-30')
+//     .sort('CLOUD_COVER')
+//     .first();
+    
+//Mosaic theese 3 image collections 
+//var mosaic_2 = ee.ImageCollection.fromImages([landsat_8_2, landsat_8_1, landsat_8]).mosaic();
+//clip by asset/roi
+var landsat_2019 = landsat_8.clip(table);
+
+//Display the cliped image collection with visual parameters (Bands & RGB)
+//Map.addLayer(landsat_2019, {min: 0, max: 8}, 'PerdidoBay_2019');
+
+//Merge sample points together into one FeatureCollection
+var landcover_2019 = Open_Water.merge(Crops_Pasture).merge(Mixed_Forest).merge(Evergreen_Forest).merge(Developed_HighMediumLow).merge(Developed_OpenSpace).merge(Grasslands_Shrub).merge(Barren_Land).merge(Wetlands);
+
+//Select Bands from mosaic Image for training
+var bands = ['B2', 'B3', "B4", 'B5', 'B6', 'B7'];
+
+//The name of the property on the points storing the class lebel
+var classProperty = 'LULC';
+
+//Sample the input imagery to get a FeatureCollection of training data
+var training = landsat_2019.select(bands).sampleRegions({
+  collection: landcover_2019,
+  properties: [classProperty],
+  scale: 30
+});
+
+//Train the classifier
+var classifier = ee.Classifier.smileCart().train({
+  features: training,
+  classProperty: classProperty,
+});
+
+//Classify the input imagery
+var classified_2019 = landsat_2019.classify(classifier).clip(table);
+
+//Define color palette
+var custom_palette = [
+  '1272d6', // Open_Water (0)
+  'd3e013', // Crops_Pasture (1)
+  '37d84b', // Mixed_Forest (2) 
+  '068015', // Evergreen_Forest (3)
+  'da1111', // Developed_HighMediumLow (4) 
+  'de9e4e', // Developed_OpenSpace (5) 
+  '93c028', // Grassland_Shrub (6) 
+  'b78811', // Barren_land (7) 
+  '05d4de', // Wetlands (8) 
+];
+
+//Display the classified result 
+Map.addLayer(classified_2019, {min:0, max: 8, palette: custom_palette}, 'LULC_2019');
+
+//Optinally, do some accuracy assessment. First, add a column of random uniforms to the training dataset.
+var withRandom = training.randomColumn('random');
+
+//We want to reserve some of the data for testing, to avoid overfitting the model.
+var split = 0.7; //Roughly 70% training, 30% testing.
+var trainingPartition = withRandom.filter(ee.Filter.lt('random', split));
+var testingPartition = withRandom.filter(ee.Filter.gte('random', split));
+
+//Trained with 70% of our data.
+var trainedClassifier = ee.Classifier.smileRandomForest(9).train({
+  features: trainingPartition,
+  classProperty: classProperty,
+  inputProperties: bands
+});
+
+//classify the test FeatureCollection.
+var test = testingPartition.classify(trainedClassifier);
+
+//Print the Confusion Matrix.
+var confusionMatrix_2019 = test.errorMatrix(classProperty, 'classification');
+print('Confusion Matrix 2019', confusionMatrix_2019);
+//print('Validation accuracy 2019: ',confusionMatrix_2019.accuracy());
+
+var OA = confusionMatrix_2019.accuracy()
+var CA = confusionMatrix_2019.consumersAccuracy()
+var Kappa = confusionMatrix_2019.kappa()
+var Order = confusionMatrix_2019.order()
+var PA = confusionMatrix_2019.producersAccuracy()
+
+print(OA,'Overall Accuracy')
+print(CA,'Consumers Accuracy')
+print(Kappa,'Kappa')
+print(Order,'Order')
+print(PA,'Producers Accuracy')
+
+var exportAccuracy = ee.Feature(null, {matrix: confusionMatrix_2019.array()})
+
+// Export the FeatureCollection.
+Export.table.toDrive({
+  collection: ee.FeatureCollection(exportAccuracy),
+  description: 'exportAccuracy_2019',
+  fileFormat: 'CSV'
+});
+// Export the FeatureCollection.
+Export.table.toDrive({
+  collection: confusionMatrix_2019,
+  description: 'confusion_matrix_2019',
+  fileFormat: 'CSV'
+});
+
+// // Export the FeatureCollection.
+// Export.table.toDrive({collection: Open_Water, description: 'Open_Water',fileFormat: 'SHP'});
+// Export.table.toDrive({collection: Crops_Pasture, description: 'Crops_Pasture',fileFormat: 'SHP'});
+// Export.table.toDrive({collection: Mixed_Forest, description: 'Mixed_Forest',fileFormat: 'SHP'});
+// Export.table.toDrive({collection: Evergreen_Forest, description: 'Evergreen_Forest',fileFormat: 'SHP'});
+// Export.table.toDrive({collection: Developed_HighMediumLow, description: 'Developed_HighMediumLow',fileFormat: 'SHP'});
+// Export.table.toDrive({collection: Developed_OpenSpace, description: 'Developed_OpenSpace',fileFormat: 'SHP'});
+// Export.table.toDrive({collection: Grasslands_Shrub, description: 'Grasslands_Shrub',fileFormat: 'SHP'});
+// Export.table.toDrive({collection: Barren_Land, description: 'Barren_Land',fileFormat: 'SHP'});
+// Export.table.toDrive({collection: Wetlands, description: 'Wetlands',fileFormat: 'SHP'});
+
+// // //Determine the Land Cover Change between 2001 and 2019
+// var fromClassification = classified_2001(2001);
+// var toClassification = classified_2019(2019);
+// var classes = [0, 1, 2, 3, 4, 5, 6, 7, 8]; // Class values in your classification. Doesn't have to be consecutive
+
+// var changes = ee.ImageCollection(ee.List(
+//   classes.map(function (from, i) {
+//     return classes.map(function (to,  j) {
+//       var changeValue = classes.length * i + j + 0
+//       return fromClassification.eq(from)
+//       .and(toClassification.eq(to))
+//       .multiply(changeValue)
+//       .int8()
+//     })
+//   })
+// ).flatten()).reduce(ee.Reducer.sum())
+
+//Determine the Land Cover Change between 2001 and 2019
+var LULC_Change = classified_2019.subtract(classified_2001);
+//Map.centerObject(LULC_Change, 10);
+Map.addLayer(LULC_Change.clip(table), {
+  min:0, max:1, palette: ['red', 'green']}, 'LULC Change Between 2001 and 2019');
+print(LULC_Change, 'bands');
+
+// Export a cloud-optimized GeoTIFF.
+// Export.image.toDrive({
+//   image: LULC_Change,
+//   description: 'imageToCOGeoTiffExample',
+//   scale: 30,
+//   region: table,
+//   fileFormat: 'GeoTIFF',
+//   formatOptions: {
+//     cloudOptimized: true
+//   }
+// });
+
+
+// Calculate and print the areas
+var areas = ee.Image.pixelArea().divide(1000 * 1000).addBands(LULC_Change)
+    .reduceRegion({reducer: ee.Reducer.sum().group({
+    groupField: 1, groupName:'class',}),
+    geometry: table,scale: 30,bestEffort:true,
+    maxPixels: 1e9});
+print('Classification areas (km2)',  areas);
+
+Export.table.toDrive({
+    collection: areas,
+    description: 'class_area_by_district',
+    folder: 'earthengine',
+    fileFormat: 'CSV'})
+// Export the FeatureCollection.
+Export.image.toDrive({
+  image: classified_2019,
+  description: 'lulc_2019',
+  scale:30,
+  maxPixels: 1e12,
+  fileFormat: 'TIFF'
+});
+
+Export.image.toDrive({
+  image: classified_2019,
+  description: 'lulc_2001',
+  scale:30,
+  maxPixels: 1e12,
+  fileFormat: 'TIFF'
+});
+// // // ================================================ //
+
+// //Add Title and Legends
+// //Title //
+// Map.add(ui.Label(
+//     '2019 Land Cover Map of Perdido Bay',  {
+//       fontWeight: 'bold', BackgroundColor: 'FBF9F5',fontSize: '14px'}));
+      
+// // legend //
+// var names = ['Open_Water', 'Crops_Pasture', 'Mixed_Forest', 'Evergreen_Forest', 'Developed_HighMediumLow', 'Developed_OpenSpace', 'Grassland_Shrub', 'Barren_Land','Wetlands'];
+
+// var values = [ '0','1', '2', '3', '4', '5', '6', '7', '8' ];
+    
+// var legendsPalette = ['1272d6','d3e013','37d84b','068015','da1111','de9e4e','93c028','fbff1d','05d4de'];
+
+// // set position of panel
+// var legend = ui.Panel({style: { position: 'bottom-left', padding: '8px 15px'}});
+ 
+// // Create legend title
+// var legendTitle = ui.Label({value: ' Legends ',style: {
+//   fontWeight: 'bold', fontSize: '18px', margin: '0 0 4px 0', padding: '0' }});
+ 
+// // Add the title to the panel
+// legend.add(legendTitle);
+ 
+// var makeRow = function(color, name) {
+//   // Create the label that is actually the colored box.
+//   var colorBox = ui.Label({
+//     style: {
+//       backgroundColor: '#' + color, padding: '8px',margin: '0 0 4px 0'} });
+
+//   // Create the label filled with the description text.
+//   var description = ui.Label({
+//     value: name, style: {margin: '0 0 4px 6px'}});
+
+//   // return the panel
+//   return ui.Panel({
+//     widgets: [colorBox, description],layout: ui.Panel.Layout.Flow('horizontal')})};
+ 
+// // Add color and and names
+// for (var i = 0; i < 9; i++) {
+//   legend.add(makeRow(legendsPalette[i], names[i]));
+//   }  
+
+// // Add the legend to the map.
+// Map.add(legend);
